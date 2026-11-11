@@ -3,7 +3,6 @@ import Card from '../../components/common/Card';
 import Badge from '../../components/common/Badge';
 import Modal from '../../components/common/Modal';
 import LoadingSkeleton from '../../components/common/LoadingSkeleton';
-import EmptyState from '../../components/common/EmptyState';
 import api from '../../services/api';
 import { toast } from 'react-toastify';
 import {
@@ -14,12 +13,36 @@ import {
   Boxes,
   Plus,
   Edit,
-  CheckCircle2,
-  XCircle,
   Search,
   Star,
   Layers,
+  MapPin,
+  ShieldCheck,
+  Trash2,
 } from 'lucide-react';
+
+const OPERATIONAL_PERMISSION_GROUPS = [
+  { label: 'IQC (Incoming Quality Control)', key: 'perform_iqc' },
+  { label: 'IQC Approval Authority', key: 'approve_iqc' },
+  { label: 'Production Execution', key: 'execute_production' },
+  { label: 'Production Planning & Management', key: 'manage_production' },
+  { label: 'Quality Control (Sample QC)', key: 'perform_qc' },
+  { label: 'Packaging & Box Verification', key: 'perform_packaging' },
+  { label: 'QR Code Generation & Printing', key: 'generate_qr' },
+  { label: 'Outward / Dispatch Gate Pass', key: 'execute_dispatch' },
+  { label: '3-Way Dispatch Approval (Admin)', key: 'dispatch_approval_admin' },
+  { label: '3-Way Dispatch Approval (Sales)', key: 'dispatch_approval_sales' },
+  { label: '3-Way Dispatch Approval (Accounts)', key: 'dispatch_approval_accounts' },
+];
+
+const DEFAULT_UNITS = [
+  { code: 'kg', name: 'Kilogram (kg)', category: 'Mass / Weight' },
+  { code: 'pcs', name: 'Pieces (pcs)', category: 'Count / Discrete' },
+  { code: 'ltr', name: 'Liters (ltr)', category: 'Volume / Liquid' },
+  { code: 'mtr', name: 'Meters (mtr)', category: 'Length / Linear' },
+  { code: 'set', name: 'Assembly Set (set)', category: 'Composite Unit' },
+  { code: 'box', name: 'Master Carton Box (box)', category: 'Packaging Unit' },
+];
 
 export default function MasterDataPage() {
   const [activeTab, setActiveTab] = useState('vendors');
@@ -29,6 +52,8 @@ export default function MasterDataPage() {
   const [products, setProducts] = useState([]);
   const [users, setUsers] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [departments, setDepartments] = useState([]);
+  const [locations, setLocations] = useState([]);
   const [rolesAndDepts, setRolesAndDepts] = useState({ roles: [], departments: [] });
 
   const [loading, setLoading] = useState(true);
@@ -40,15 +65,18 @@ export default function MasterDataPage() {
   const [materialModalOpen, setMaterialModalOpen] = useState(false);
   const [productModalOpen, setProductModalOpen] = useState(false);
   const [userModalOpen, setUserModalOpen] = useState(false);
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false);
+  const [deptLocModalOpen, setDeptLocModalOpen] = useState(false);
 
   // Form states
   const [selectedItem, setSelectedItem] = useState(null);
   const [formData, setFormData] = useState({});
+  const [bomRows, setBomRows] = useState([]);
 
   const loadData = async () => {
     try {
       setLoading(true);
-      const [vRes, cRes, mRes, pRes, uRes, catRes, rdRes] = await Promise.all([
+      const [vRes, cRes, mRes, pRes, uRes, catRes, rdRes, deptRes, locRes] = await Promise.all([
         api.get('/vendors'),
         api.get('/customers'),
         api.get('/materials'),
@@ -56,6 +84,8 @@ export default function MasterDataPage() {
         api.get('/users').catch(() => ({ data: [] })),
         api.get('/categories'),
         api.get('/users/roles-departments').catch(() => ({ data: { roles: [], departments: [] } })),
+        api.get('/departments').catch(() => ({ data: [] })),
+        api.get('/locations').catch(() => ({ data: [] })),
       ]);
 
       setVendors(vRes.data || []);
@@ -65,6 +95,8 @@ export default function MasterDataPage() {
       setUsers(uRes.data || []);
       setCategories(catRes.data || []);
       setRolesAndDepts(rdRes.data || { roles: [], departments: [] });
+      setDepartments(deptRes.data || []);
+      setLocations(locRes.data || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -131,14 +163,56 @@ export default function MasterDataPage() {
   const handleProductSubmit = async (e) => {
     e.preventDefault();
     try {
+      const payload = {
+        ...formData,
+        bom_items: bomRows.filter((r) => r.material_id && Number(r.quantity_required) > 0),
+      };
       if (selectedItem) {
-        await api.put(`/products/${selectedItem.id}`, formData);
-        toast.success('Product updated');
+        await api.put(`/products/${selectedItem.id}`, payload);
+        toast.success('Product & BOM updated');
       } else {
-        await api.post('/products', formData);
-        toast.success('Product created');
+        await api.post('/products', payload);
+        toast.success('Product & BOM created');
       }
       setProductModalOpen(false);
+      loadData();
+    } catch {
+      // toast
+    }
+  };
+
+  const handleCategorySubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await api.post('/categories', formData);
+      toast.success('Category created');
+      setCategoryModalOpen(false);
+      loadData();
+    } catch {
+      // toast
+    }
+  };
+
+  const handleDeptLocSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      if (formData.record_type === 'location') {
+        await api.post('/locations', {
+          name: formData.name,
+          code: formData.code,
+          division: formData.division || 'Store',
+          description: formData.description,
+        });
+        toast.success('Storage Location created');
+      } else {
+        await api.post('/departments', {
+          name: formData.name,
+          code: formData.code,
+          description: formData.description,
+        });
+        toast.success('Department created');
+      }
+      setDeptLocModalOpen(false);
       loadData();
     } catch {
       // toast
@@ -150,7 +224,7 @@ export default function MasterDataPage() {
     try {
       if (selectedItem) {
         await api.put(`/users/${selectedItem.id}`, formData);
-        toast.success('User updated');
+        toast.success('User & Operational Permissions updated');
       } else {
         await api.post('/users', formData);
         toast.success('User created');
@@ -162,17 +236,36 @@ export default function MasterDataPage() {
     }
   };
 
+  const togglePermission = (permKey) => {
+    const current = Array.isArray(formData.operational_permissions)
+      ? formData.operational_permissions
+      : [];
+    if (current.includes(permKey)) {
+      setFormData({
+        ...formData,
+        operational_permissions: current.filter((p) => p !== permKey),
+      });
+    } else {
+      setFormData({
+        ...formData,
+        operational_permissions: [...current, permKey],
+      });
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-slate-900">Master Data Management</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Central repository of vendors, customers, materials, products, and users.</p>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Central repository of vendors, customers, materials, products/BOM, categories, departments, locations, units, and RBAC users.
+          </p>
         </div>
 
         {/* Action Button depending on active tab */}
-        <div>
+        <div className="flex gap-2">
           {activeTab === 'vendors' && (
             <button
               onClick={() => { setSelectedItem(null); setFormData({ status: 'Active', rating: 4.5 }); setVendorModalOpen(true); }}
@@ -193,7 +286,7 @@ export default function MasterDataPage() {
           )}
           {activeTab === 'materials' && (
             <button
-              onClick={() => { setSelectedItem(null); setFormData({ status: 'Active', unit: 'kg', reorder_level: 50 }); setMaterialModalOpen(true); }}
+              onClick={() => { setSelectedItem(null); setFormData({ status: 'Active', unit: 'kg', reorder_level: 50, standard_cost: 250 }); setMaterialModalOpen(true); }}
               className="px-3.5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
             >
               <Plus className="w-4 h-4" />
@@ -202,16 +295,43 @@ export default function MasterDataPage() {
           )}
           {activeTab === 'products' && (
             <button
-              onClick={() => { setSelectedItem(null); setFormData({ status: 'Active', unit: 'pcs', bom_type: 'Machined Assembly' }); setProductModalOpen(true); }}
+              onClick={() => {
+                setSelectedItem(null);
+                setFormData({ status: 'Active', unit: 'pcs', bom_type: 'Machined Assembly', price: 4500 });
+                setBomRows([]);
+                setProductModalOpen(true);
+              }}
               className="px-3.5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
             >
               <Plus className="w-4 h-4" />
-              <span>Add Product</span>
+              <span>Add Product & BOM</span>
+            </button>
+          )}
+          {activeTab === 'categories' && (
+            <button
+              onClick={() => { setSelectedItem(null); setFormData({ name: '', description: '' }); setCategoryModalOpen(true); }}
+              className="px-3.5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add Category</span>
+            </button>
+          )}
+          {activeTab === 'departments' && (
+            <button
+              onClick={() => { setSelectedItem(null); setFormData({ record_type: 'department', name: '', code: '', division: 'Store' }); setDeptLocModalOpen(true); }}
+              className="px-3.5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add Department / Location</span>
             </button>
           )}
           {activeTab === 'users' && (
             <button
-              onClick={() => { setSelectedItem(null); setFormData({ status: 'Active', password: 'Demo@123' }); setUserModalOpen(true); }}
+              onClick={() => {
+                setSelectedItem(null);
+                setFormData({ status: 'Active', password: 'Demo@123', operational_permissions: ['perform_iqc', 'execute_production'] });
+                setUserModalOpen(true);
+              }}
               className="px-3.5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
             >
               <Plus className="w-4 h-4" />
@@ -228,7 +348,9 @@ export default function MasterDataPage() {
           { id: 'customers', label: `Customers (${customers.length})`, icon: Building },
           { id: 'materials', label: `Materials (${materials.length})`, icon: Boxes },
           { id: 'products', label: `Products & BOM (${products.length})`, icon: Package },
-          { id: 'users', label: `Users & Roles (${users.length})`, icon: Users },
+          { id: 'categories', label: `Categories & Units (${categories.length})`, icon: Layers },
+          { id: 'departments', label: `Depts & Locations (${departments.length + locations.length})`, icon: MapPin },
+          { id: 'users', label: `Users & RBAC (${users.length})`, icon: Users },
         ].map((tab) => {
           const Icon = tab.icon;
           return (
@@ -434,14 +556,32 @@ export default function MasterDataPage() {
                           <td className="px-4 py-3 font-mono">{p.unit}</td>
                           <td className="px-4 py-3 font-mono font-semibold">₹{p.price?.toLocaleString('en-IN')}</td>
                           <td className="px-4 py-3">
-                            <span className="px-2 py-0.5 rounded-full text-[11px] bg-slate-100 text-slate-700 font-mono">
-                              {p.bom_items?.length || 0} parts
-                            </span>
+                            <div className="flex flex-wrap gap-1">
+                              <span className="px-2 py-0.5 rounded-full text-[11px] bg-brand-50 text-brand-700 font-mono font-semibold">
+                                {p.bom_items?.length || 0} materials
+                              </span>
+                              {p.bom_items?.map((bi) => (
+                                <span key={bi.id} className="px-1.5 py-0.5 bg-slate-100 rounded text-[10px] text-slate-600">
+                                  {bi.material?.material_code}: {bi.quantity_required}{bi.material?.unit}
+                                </span>
+                              ))}
+                            </div>
                           </td>
                           <td className="px-4 py-3"><Badge status={p.status} /></td>
                           <td className="px-4 py-3 text-right">
                             <button
-                              onClick={() => { setSelectedItem(p); setFormData(p); setProductModalOpen(true); }}
+                              onClick={() => {
+                                setSelectedItem(p);
+                                setFormData(p);
+                                setBomRows(
+                                  (p.bom_items || []).map((b) => ({
+                                    material_id: b.material_id,
+                                    quantity_required: b.quantity_required,
+                                    notes: b.notes || '',
+                                  }))
+                                );
+                                setProductModalOpen(true);
+                              }}
                               className="p-1 text-slate-400 hover:text-brand-600 transition-colors"
                             >
                               <Edit className="w-4 h-4" />
@@ -455,7 +595,109 @@ export default function MasterDataPage() {
             </Card>
           )}
 
-          {/* 5. USERS TAB */}
+          {/* 5. CATEGORIES & UNITS OF MEASUREMENT TAB */}
+          {activeTab === 'categories' && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card title="Product & Material Categories" subtitle="Master taxonomy for BOM and raw materials">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs text-slate-600">
+                    <thead className="bg-slate-50 text-slate-700 uppercase font-semibold border-b border-slate-200">
+                      <tr>
+                        <th className="px-4 py-3">ID</th>
+                        <th className="px-4 py-3">Category Name</th>
+                        <th className="px-4 py-3">Description</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {categories.map((cat) => (
+                        <tr key={cat.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 font-mono font-bold text-slate-900">CAT-{cat.id}</td>
+                          <td className="px-4 py-3 font-semibold text-slate-800">{cat.name}</td>
+                          <td className="px-4 py-3 text-slate-500">{cat.description || 'Standard Manufacturing Category'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+
+              <Card title="Units of Measurement (UoM)" subtitle="Standardized engineering and inventory measurement units">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs text-slate-600">
+                    <thead className="bg-slate-50 text-slate-700 uppercase font-semibold border-b border-slate-200">
+                      <tr>
+                        <th className="px-4 py-3">UoM Symbol</th>
+                        <th className="px-4 py-3">Unit Name</th>
+                        <th className="px-4 py-3">Measurement Dimension</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {DEFAULT_UNITS.map((u) => (
+                        <tr key={u.code} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 font-mono font-bold text-brand-700">{u.code}</td>
+                          <td className="px-4 py-3 font-semibold text-slate-800">{u.name}</td>
+                          <td className="px-4 py-3 text-slate-500">{u.category}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {/* 6. DEPARTMENTS & LOCATIONS TAB */}
+          {activeTab === 'departments' && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card title="Plant Departments" subtitle="Organizational units mapped to RBAC users & production lines">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs text-slate-600">
+                    <thead className="bg-slate-50 text-slate-700 uppercase font-semibold border-b border-slate-200">
+                      <tr>
+                        <th className="px-4 py-3">Code</th>
+                        <th className="px-4 py-3">Department Name</th>
+                        <th className="px-4 py-3">Description</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {departments.map((d) => (
+                        <tr key={d.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 font-mono font-bold text-slate-900">{d.code}</td>
+                          <td className="px-4 py-3 font-semibold text-slate-800">{d.name}</td>
+                          <td className="px-4 py-3 text-slate-500">{d.description || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+
+              <Card title="Warehouse & IQC Storage Locations" subtitle="Physical bins mapped to Paint, Assembly, Store, and Basement divisions">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs text-slate-600">
+                    <thead className="bg-slate-50 text-slate-700 uppercase font-semibold border-b border-slate-200">
+                      <tr>
+                        <th className="px-4 py-3">Bin Code</th>
+                        <th className="px-4 py-3">Location Name</th>
+                        <th className="px-4 py-3">Division</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {locations.map((loc) => (
+                        <tr key={loc.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 font-mono font-bold text-slate-900">{loc.code}</td>
+                          <td className="px-4 py-3 font-semibold text-slate-800">{loc.name}</td>
+                          <td className="px-4 py-3"><Badge status={loc.division} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {/* 7. USERS TAB */}
           {activeTab === 'users' && (
             <Card>
               <div className="overflow-x-auto">
@@ -466,7 +708,7 @@ export default function MasterDataPage() {
                       <th className="px-4 py-3">Email</th>
                       <th className="px-4 py-3">Role</th>
                       <th className="px-4 py-3">Department</th>
-                      <th className="px-4 py-3">Operational Permissions</th>
+                      <th className="px-4 py-3">Configurable Operational Permissions</th>
                       <th className="px-4 py-3">Status</th>
                       <th className="px-4 py-3 text-right">Actions</th>
                     </tr>
@@ -486,13 +728,13 @@ export default function MasterDataPage() {
                           <td className="px-4 py-3">{u.Department?.name || 'Operations'}</td>
                           <td className="px-4 py-3">
                             <div className="flex flex-wrap gap-1 max-w-xs">
-                              {Array.isArray(u.operational_permissions) && u.operational_permissions.slice(0, 3).map((p) => (
+                              {Array.isArray(u.operational_permissions) && u.operational_permissions.slice(0, 4).map((p) => (
                                 <span key={p} className="px-1.5 py-0.5 bg-slate-100 rounded text-[10px] font-mono text-slate-600">
                                   {p}
                                 </span>
                               ))}
-                              {u.operational_permissions?.length > 3 && (
-                                <span className="text-[10px] text-slate-400">+{u.operational_permissions.length - 3} more</span>
+                              {u.operational_permissions?.length > 4 && (
+                                <span className="text-[10px] text-slate-400">+{u.operational_permissions.length - 4} more</span>
                               )}
                             </div>
                           </td>
@@ -600,19 +842,8 @@ export default function MasterDataPage() {
           </div>
 
           <div className="flex justify-end gap-2 pt-3 border-t">
-            <button
-              type="button"
-              onClick={() => setVendorModalOpen(false)}
-              className="px-4 py-2 border rounded-lg text-xs"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 bg-brand-600 text-white rounded-lg text-xs font-semibold"
-            >
-              Save Vendor
-            </button>
+            <button type="button" onClick={() => setVendorModalOpen(false)} className="px-4 py-2 border rounded-lg text-xs">Cancel</button>
+            <button type="submit" className="px-4 py-2 bg-brand-600 text-white rounded-lg text-xs font-semibold">Save Vendor</button>
           </div>
         </form>
       </Modal>
@@ -726,13 +957,16 @@ export default function MasterDataPage() {
               </select>
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Unit</label>
-              <input
-                type="text"
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Unit (UoM)</label>
+              <select
                 value={formData.unit || 'kg'}
                 onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
                 className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg font-mono"
-              />
+              >
+                {DEFAULT_UNITS.map((u) => (
+                  <option key={u.code} value={u.code}>{u.name}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">Reorder Level</label>
@@ -751,11 +985,11 @@ export default function MasterDataPage() {
         </form>
       </Modal>
 
-      {/* PRODUCT MODAL */}
+      {/* PRODUCT & BOM MODAL */}
       <Modal
         isOpen={productModalOpen}
         onClose={() => setProductModalOpen(false)}
-        title={selectedItem ? 'Edit Product & BOM' : 'Create Product'}
+        title={selectedItem ? 'Edit Product & Bill of Materials (BOM)' : 'Create Product & BOM'}
       >
         <form onSubmit={handleProductSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
@@ -800,18 +1034,171 @@ export default function MasterDataPage() {
               />
             </div>
           </div>
+
+          {/* BOM Editor */}
+          <div className="border-t border-slate-200 pt-3">
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-bold text-slate-800">Bill of Materials (BOM Requirements per Unit)</label>
+              <button
+                type="button"
+                onClick={() => setBomRows([...bomRows, { material_id: materials[0]?.id || '', quantity_required: 1 }])}
+                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-semibold flex items-center gap-1"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add BOM Material
+              </button>
+            </div>
+            <div className="space-y-2 max-h-44 overflow-y-auto">
+              {bomRows.map((row, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <select
+                    value={row.material_id}
+                    onChange={(e) => {
+                      const updated = [...bomRows];
+                      updated[idx].material_id = Number(e.target.value);
+                      setBomRows(updated);
+                    }}
+                    className="flex-1 px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg"
+                  >
+                    <option value="">Select Material</option>
+                    {materials.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.material_code} - {m.name} ({m.unit})
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={row.quantity_required}
+                    onChange={(e) => {
+                      const updated = [...bomRows];
+                      updated[idx].quantity_required = parseFloat(e.target.value) || 0;
+                      setBomRows(updated);
+                    }}
+                    className="w-24 px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg"
+                    placeholder="Qty"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setBomRows(bomRows.filter((_, i) => i !== idx))}
+                    className="p-1.5 text-rose-500 hover:bg-rose-50 rounded"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
           <div className="flex justify-end gap-2 pt-3 border-t">
             <button type="button" onClick={() => setProductModalOpen(false)} className="px-4 py-2 border rounded-lg text-xs">Cancel</button>
-            <button type="submit" className="px-4 py-2 bg-brand-600 text-white rounded-lg text-xs font-semibold">Save Product</button>
+            <button type="submit" className="px-4 py-2 bg-brand-600 text-white rounded-lg text-xs font-semibold">Save Product & BOM</button>
           </div>
         </form>
       </Modal>
 
-      {/* USER MODAL */}
+      {/* CATEGORY MODAL */}
+      <Modal
+        isOpen={categoryModalOpen}
+        onClose={() => setCategoryModalOpen(false)}
+        title="Create Product / Material Category"
+      >
+        <form onSubmit={handleCategorySubmit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Category Name</label>
+            <input
+              type="text"
+              required
+              value={formData.name || ''}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg"
+              placeholder="e.g., Precision Castings"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Description</label>
+            <textarea
+              rows={2}
+              value={formData.description || ''}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg"
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-3 border-t">
+            <button type="button" onClick={() => setCategoryModalOpen(false)} className="px-4 py-2 border rounded-lg text-xs">Cancel</button>
+            <button type="submit" className="px-4 py-2 bg-brand-600 text-white rounded-lg text-xs font-semibold">Save Category</button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* DEPARTMENT / LOCATION MODAL */}
+      <Modal
+        isOpen={deptLocModalOpen}
+        onClose={() => setDeptLocModalOpen(false)}
+        title="Add Plant Department or Warehouse Location"
+      >
+        <form onSubmit={handleDeptLocSubmit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Record Type</label>
+            <select
+              value={formData.record_type || 'department'}
+              onChange={(e) => setFormData({ ...formData, record_type: e.target.value })}
+              className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg"
+            >
+              <option value="department">Plant Department</option>
+              <option value="location">Warehouse / IQC Storage Location</option>
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Code</label>
+              <input
+                type="text"
+                required
+                value={formData.code || ''}
+                onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg font-mono"
+                placeholder="DEPT-09 or LOC-B2"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Name</label>
+              <input
+                type="text"
+                required
+                value={formData.name || ''}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg"
+              />
+            </div>
+          </div>
+          {formData.record_type === 'location' && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">IQC / Plant Division</label>
+              <select
+                value={formData.division || 'Store'}
+                onChange={(e) => setFormData({ ...formData, division: e.target.value })}
+                className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg"
+              >
+                <option value="Paint">Paint</option>
+                <option value="Assembly">Assembly</option>
+                <option value="Store">Store</option>
+                <option value="Basement">Basement</option>
+              </select>
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-3 border-t">
+            <button type="button" onClick={() => setDeptLocModalOpen(false)} className="px-4 py-2 border rounded-lg text-xs">Cancel</button>
+            <button type="submit" className="px-4 py-2 bg-brand-600 text-white rounded-lg text-xs font-semibold">Save Record</button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* USER MODAL WITH CONFIGURABLE OPERATIONAL PERMISSIONS */}
       <Modal
         isOpen={userModalOpen}
         onClose={() => setUserModalOpen(false)}
-        title={selectedItem ? 'Edit User Credentials & Access' : 'Create System User'}
+        title={selectedItem ? 'Edit User Credentials & Configurable Operational Permissions' : 'Create System User'}
       >
         <form onSubmit={handleUserSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
@@ -866,6 +1253,32 @@ export default function MasterDataPage() {
             </div>
           </div>
 
+          {/* Configurable Operational Permissions */}
+          <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+            <div className="flex items-center gap-1.5 mb-2">
+              <ShieldCheck className="w-4 h-4 text-brand-600" />
+              <span className="text-xs font-bold text-slate-800">
+                Configurable Operational Permissions (IQC, Production, QC, Packaging, Outward Dispatch)
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {OPERATIONAL_PERMISSION_GROUPS.map((perm) => {
+                const checked = Array.isArray(formData.operational_permissions) && formData.operational_permissions.includes(perm.key);
+                return (
+                  <label key={perm.key} className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => togglePermission(perm.key)}
+                      className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                    />
+                    <span>{perm.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
           {!selectedItem && (
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">Password</label>
@@ -881,11 +1294,10 @@ export default function MasterDataPage() {
 
           <div className="flex justify-end gap-2 pt-3 border-t">
             <button type="button" onClick={() => setUserModalOpen(false)} className="px-4 py-2 border rounded-lg text-xs">Cancel</button>
-            <button type="submit" className="px-4 py-2 bg-brand-600 text-white rounded-lg text-xs font-semibold">Save User</button>
+            <button type="submit" className="px-4 py-2 bg-brand-600 text-white rounded-lg text-xs font-semibold">Save User & Permissions</button>
           </div>
         </form>
       </Modal>
     </div>
   );
 }
-

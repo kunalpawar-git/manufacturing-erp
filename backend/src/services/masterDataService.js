@@ -131,4 +131,14 @@ export const updateProduct = async (id, productData, bomItems = null, userId) =>
 
 // DEPARTMENTS & LOCATIONS
 export const getDepartments = async () => Department.findAll({ order: [['name', 'ASC']] });
+export const createDepartment = async (data, userId) => {
+  const dept = await Department.create(data);
+  await logAudit({ userId, action: 'CREATE_DEPARTMENT', entityType: 'Department', entityId: dept.id, newValues: data });
+  return dept;
+};
 export const getLocations = async () => Location.findAll({ order: [['name', 'ASC']] });
+export const createLocation = async (data, userId) => {
+  const loc = await Location.create(data);
+  await logAudit({ userId, action: 'CREATE_LOCATION', entityType: 'Location', entityId: loc.id, newValues: data });
+  return loc;
+};

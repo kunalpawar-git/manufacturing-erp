@@ -244,7 +244,7 @@ export default function PackagingPage() {
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <span className="font-bold text-slate-800">Generated Master Boxes ({selectedOrder.boxes?.length || 0})</span>
               <a
-                href={`/api/qr/labels-pdf?type=boxes`}
+                href={`/api/qr/labels-pdf?type=boxes&token=${encodeURIComponent(localStorage.getItem('erp_token') || '')}`}
                 target="_blank"
                 rel="noreferrer"
                 className="px-2.5 py-1 text-xs bg-slate-100 hover:bg-slate-200 rounded font-semibold flex items-center gap-1 text-slate-700"

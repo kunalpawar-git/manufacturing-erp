@@ -167,3 +167,78 @@ export const generateDispatchGatePass = async (shipment, boxes = [], parts = [])
     }
   });
 };
+
+/**
+ * Generates a formatted enterprise PDF report from tabular columns and rows.
+ */
+export const generateReportPdf = async (title = 'ERP Operational Report', columns = [], rows = []) => {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ margin: 30, size: 'A4', layout: 'landscape' });
+      const buffers = [];
+
+      doc.on('data', buffers.push.bind(buffers));
+      doc.on('end', () => resolve(Buffer.concat(buffers)));
+
+      // Header Banner
+      doc.rect(30, 25, 780, 48).fill('#0f243a');
+      doc.fontSize(15).font('Helvetica-Bold').fillColor('#ffffff').text(title.toUpperCase(), 45, 34);
+      doc.fontSize(8.5).font('Helvetica').fillColor('#94a3b8').text(
+        `Manufacturing Operations & QR Traceability ERP | Generated: ${new Date().toLocaleString('en-IN')} | Total Records: ${rows.length}`,
+        45,
+        54
+      );
+
+      const pageWidth = 780;
+      const colCount = Math.max(columns.length, 1);
+      const colWidth = Math.floor(pageWidth / colCount);
+      let y = 85;
+
+      const drawHeader = (topY) => {
+        doc.rect(30, topY, pageWidth, 22).fill('#1e293b');
+        columns.forEach((col, i) => {
+          doc
+            .fontSize(8)
+            .font('Helvetica-Bold')
+            .fillColor('#ffffff')
+            .text(String(col.header || ''), 34 + i * colWidth, topY + 6, {
+              width: colWidth - 8,
+              ellipsis: true,
+            });
+        });
+        return topY + 24;
+      };
+
+      y = drawHeader(y);
+
+      rows.forEach((row, rIdx) => {
+        if (y > 530) {
+          doc.addPage({ margin: 30, size: 'A4', layout: 'landscape' });
+          y = drawHeader(35);
+        }
+
+        if (rIdx % 2 === 0) {
+          doc.rect(30, y - 2, pageWidth, 18).fill('#f8fafc');
+        }
+
+        columns.forEach((col, cIdx) => {
+          const val = row[col.key] !== null && row[col.key] !== undefined ? String(row[col.key]) : '-';
+          doc
+            .fontSize(7.5)
+            .font('Helvetica')
+            .fillColor('#1e293b')
+            .text(val, 34 + cIdx * colWidth, y + 2, {
+              width: colWidth - 8,
+              ellipsis: true,
+            });
+        });
+
+        y += 18;
+      });
+
+      doc.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+};

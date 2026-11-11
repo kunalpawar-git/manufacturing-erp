@@ -5,11 +5,30 @@ import fs from 'fs';
 
 dotenv.config();
 
-const dialect = process.env.DB_DIALECT || 'sqlite';
+const dialect = process.env. DATABASE_URL ? 'postgres' : (process.env.DB_DIALECT || 'sqlite');
 
 let sequelize;
 
-if (dialect === 'postgres') {
+if (process.env.DATABASE_URL) {
+  // Cloud PostgreSQL connection string (Neon.tech, Supabase, Render, Railway)
+  sequelize = new Sequelize(process.env.DATABASE_URL, {
+    dialect: 'postgres',
+    logging: false,
+    dialectOptions:
+      process.env.DB_SSL === 'false'
+        ? {}
+        : {
+            ssl: {
+              require: true,
+              rejectUnauthorized: false,
+            },
+          },
+    define: {
+      timestamps: true,
+      underscored: true,
+    },
+  });
+} else if (dialect === 'postgres') {
   sequelize = new Sequelize(
     process.env.DB_NAME || 'manufacturing_erp',
     process.env.DB_USER || 'postgres',
@@ -18,7 +37,7 @@ if (dialect === 'postgres') {
       host: process.env.DB_HOST || 'localhost',
       port: parseInt(process.env.DB_PORT || '5432', 10),
       dialect: 'postgres',
-      logging: process.env.NODE_ENV === 'test' ? false : false,
+      logging: false,
       pool: {
         max: 10,
         min: 0,
@@ -37,8 +56,8 @@ if (dialect === 'postgres') {
     fs.mkdirSync(dataDir, { recursive: true });
   }
 
-  const storagePath = process.env.DB_STORAGE 
-    ? path.resolve(process.cwd(), process.env.DB_STORAGE) 
+  const storagePath = process.env.DB_STORAGE
+    ? path.resolve(process.cwd(), process.env.DB_STORAGE)
     : path.resolve(dataDir, 'manufacturing_erp.sqlite');
 
   sequelize = new Sequelize({

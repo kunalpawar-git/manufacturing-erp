@@ -109,9 +109,21 @@ export const getDepartments = async (req, res, next) => {
     res.json({ success: true, data });
   } catch (err) { next(err); }
 };
+export const createDepartment = async (req, res, next) => {
+  try {
+    const data = await masterDataService.createDepartment(req.body, req.user.id);
+    res.status(201).json({ success: true, message: 'Department created', data });
+  } catch (err) { next(err); }
+};
 export const getLocations = async (req, res, next) => {
   try {
     const data = await masterDataService.getLocations();
     res.json({ success: true, data });
+  } catch (err) { next(err); }
+};
+export const createLocation = async (req, res, next) => {
+  try {
+    const data = await masterDataService.createLocation(req.body, req.user.id);
+    res.status(201).json({ success: true, message: 'Location created', data });
   } catch (err) { next(err); }
 };

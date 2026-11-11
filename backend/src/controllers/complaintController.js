@@ -54,6 +54,15 @@ export const exportReportExcel = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+export const exportReportPdf = async (req, res, next) => {
+  try {
+    const pdfBuffer = await reportService.exportReportPdf(req.params.reportType, req.query);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=Report_${req.params.reportType}_${Date.now()}.pdf`);
+    res.send(pdfBuffer);
+  } catch (err) { next(err); }
+};
+
 // DASHBOARD
 export const getDashboardMetrics = async (req, res, next) => {
   try {

@@ -54,7 +54,9 @@ router.put('/products/:id', authenticate, authorizeRole(ROLES.SUPER_ADMIN, ROLES
 
 // Departments & Locations
 router.get('/departments', authenticate, masterCtrl.getDepartments);
+router.post('/departments', authenticate, authorizeRole(ROLES.SUPER_ADMIN, ROLES.ADMIN), masterCtrl.createDepartment);
 router.get('/locations', authenticate, masterCtrl.getLocations);
+router.post('/locations', authenticate, authorizeRole(ROLES.SUPER_ADMIN, ROLES.ADMIN), masterCtrl.createLocation);
 
 // ================= PURCHASE ORDERS & RECEIPTS =================
 router.get('/purchase-orders', authenticate, poCtrl.getPurchaseOrders);
@@ -129,6 +131,7 @@ router.put('/complaints/:id/investigate', authenticate, compCtrl.updateComplaint
 // ================= REPORTS & EXPORTS =================
 router.get('/reports/:reportType', authenticate, compCtrl.getReportData);
 router.get('/reports/:reportType/export-excel', authenticate, compCtrl.exportReportExcel);
+router.get('/reports/:reportType/export-pdf', authenticate, compCtrl.exportReportPdf);
 
 // ================= DASHBOARD & NOTIFICATIONS & AUDIT =================
 router.get('/dashboard', authenticate, compCtrl.getDashboardMetrics);

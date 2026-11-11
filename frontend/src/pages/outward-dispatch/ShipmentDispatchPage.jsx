@@ -117,7 +117,7 @@ export default function ShipmentDispatchPage() {
     if (!selectedShipment) return;
 
     try {
-      const res = await api.post(`/api/shipments/${selectedShipment.id}/dispatch`, dispatchForm);
+      const res = await api.post(`/shipments/${selectedShipment.id}/dispatch`, dispatchForm);
       toast.success(res.message || 'Shipment dispatched successfully!');
       setDispatchModalOpen(false);
       loadData();

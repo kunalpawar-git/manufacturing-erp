@@ -19,3 +19,4 @@ ENV NODE_ENV=production
 
 # Run migrations/seed and start server
 CMD ["sh", "-c", "npm run seed && npm start"]
+

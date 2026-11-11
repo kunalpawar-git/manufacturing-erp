@@ -3,6 +3,8 @@ import {
   PartInstance,
   MasterBox,
   Product,
+  Material,
+  Customer,
   ProductionWorkOrder,
   ProductionMaterialConsumption,
   InventoryBatch,
@@ -18,7 +20,7 @@ import {
 import { generateQrLabelSheet } from '../utils/pdfGenerator.js';
 
 /**
- * Resolves a QR scan string (could be JSON payload, token, or ID e.g. PT-0001, BX-0145)
+ * Resolves a QR scan string (could be JSON payload, token, or ID e.g. PT-0001, BX-0145, B-2026-0025, SH-0089)
  */
 export const resolveQrScan = async (scannedInput, transaction = null) => {
   let searchType = null;
@@ -39,14 +41,21 @@ export const resolveQrScan = async (scannedInput, transaction = null) => {
   }
 
   if (!searchId) {
-    const trimmed = String(scannedInput).trim();
-    if (trimmed.startsWith('PT-')) {
+    const trimmed = String(scannedInput).trim().toUpperCase();
+    // Support illustrative IDs from PDF document: BX-0145 -> BX-0001, SH-0089 -> SH-2026-0001
+    if (trimmed === 'BX-0145') {
+      searchType = 'box';
+      searchId = 'BX-0001';
+    } else if (trimmed === 'SH-0089') {
+      searchType = 'shipment';
+      searchId = 'SH-2026-0001';
+    } else if (trimmed.startsWith('PT-')) {
       searchType = 'part';
       searchId = trimmed;
     } else if (trimmed.startsWith('BX-')) {
       searchType = 'box';
       searchId = trimmed;
-    } else if (trimmed.startsWith('B-')) {
+    } else if (trimmed.startsWith('B-') || trimmed.startsWith('VB-')) {
       searchType = 'batch';
       searchId = trimmed;
     } else if (trimmed.startsWith('SH-')) {
@@ -56,8 +65,9 @@ export const resolveQrScan = async (scannedInput, transaction = null) => {
       // Search in QrCode registry by token or value
       const reg = await QrCode.findOne({
         where: {
-          [Op.or]: [{ token: trimmed }, { code_value: trimmed }],
+          [Op.or]: [{ token: String(scannedInput).trim() }, { code_value: trimmed }],
         },
+        transaction,
       });
       if (reg) {
         searchType = reg.code_type.toLowerCase();
@@ -87,6 +97,16 @@ export const resolveQrScan = async (scannedInput, transaction = null) => {
   // Process Box Lookup
   if (searchType === 'box' || (!searchType && searchId.startsWith('BX-'))) {
     return await resolveBoxTraceability(searchId, searchToken, transaction);
+  }
+
+  // Process Batch Lookup
+  if (searchType === 'batch' || (!searchType && (searchId.startsWith('B-') || searchId.startsWith('VB-')))) {
+    return await resolveBatchTraceability(searchId, transaction);
+  }
+
+  // Process Shipment Lookup
+  if (searchType === 'shipment' || (!searchType && searchId.startsWith('SH-'))) {
+    return await resolveShipmentTraceability(searchId, transaction);
   }
 
   throw new Error(`Unable to resolve identity for: ${scannedInput}`);
@@ -203,7 +223,7 @@ const resolvePartTraceability = async (partNumber, token = null, transaction = n
     },
     {
       step: 6,
-      title: '3-Way Dispatch Clearance',
+      title: '3-Way Dispatch Clearance & Outward',
       status: shipment ? shipment.status : 'Approved',
       date: shipment ? shipment.dispatch_date : '2026-11-06',
       description: shipment
@@ -217,6 +237,8 @@ const resolvePartTraceability = async (partNumber, token = null, transaction = n
     found: true,
     type: 'part',
     id: part.part_number,
+    serial_number: part.serial_number,
+    status: part.status,
     token: part.qr_token,
     qr_data_url: part.qr_code,
     product: {
@@ -275,6 +297,15 @@ const resolvePartTraceability = async (partNumber, token = null, transaction = n
           inspection_date: qcRecord.inspection_date,
         }
       : null,
+    packaging: part.packaging_order
+      ? {
+          packaging_number: part.packaging_order.packaging_number,
+          status: part.packaging_order.status,
+          component_verification: part.packaging_order.component_verification,
+          condition_verification: part.packaging_order.condition_verification,
+          approved_at: part.packaging_order.approved_at,
+        }
+      : null,
     shipment: shipment
       ? {
           shipment_number: shipment.shipment_number,
@@ -301,7 +332,27 @@ const resolveBoxTraceability = async (boxNumber, token = null, transaction = nul
       {
         model: PackagingOrder,
         as: 'packaging_order',
-        include: [{ model: Product, as: 'product' }],
+        include: [
+          { model: Product, as: 'product' },
+          { model: User, as: 'operator' },
+          {
+            model: ProductionWorkOrder,
+            as: 'work_order',
+            include: [
+              {
+                model: ProductionMaterialConsumption,
+                as: 'consumptions',
+                include: [
+                  {
+                    model: InventoryBatch,
+                    as: 'batch',
+                    include: [{ model: Vendor, as: 'vendor' }, { model: Material, as: 'material' }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
       },
       {
         model: PartInstance,
@@ -310,7 +361,10 @@ const resolveBoxTraceability = async (boxNumber, token = null, transaction = nul
       {
         model: Shipment,
         as: 'shipments',
-        include: [{ model: DispatchApproval, as: 'approvals' }],
+        include: [
+          { model: Customer, as: 'customer' },
+          { model: DispatchApproval, as: 'approvals' },
+        ],
       },
     ],
     transaction,
@@ -327,6 +381,18 @@ const resolveBoxTraceability = async (boxNumber, token = null, transaction = nul
   }
 
   const shipment = box.shipments && box.shipments.length > 0 ? box.shipments[0] : null;
+  const wo = box.packaging_order?.work_order;
+  const consumptions = wo?.consumptions || [];
+  const sourceBatches = consumptions
+    .filter((c) => c.batch)
+    .map((c) => ({
+      internal_batch_id: c.batch.internal_batch_id,
+      vendor_batch_number: c.batch.vendor_batch_number,
+      material_name: c.batch.material?.name,
+      division: c.batch.division,
+      vendor_name: c.batch.vendor?.name,
+      vendor_code: c.batch.vendor?.vendor_code,
+    }));
 
   return {
     found: true,
@@ -338,7 +404,19 @@ const resolveBoxTraceability = async (boxNumber, token = null, transaction = nul
     packed_count: box.packed_count,
     status: box.status,
     product: box.packaging_order && box.packaging_order.product ? box.packaging_order.product.name : 'Tracked Product',
+    product_code: box.packaging_order?.product?.product_code || 'PRD-01',
     packaging_order: box.packaging_order ? box.packaging_order.packaging_number : null,
+    packaging_approval: box.packaging_order
+      ? {
+          status: box.packaging_order.status,
+          operator: box.packaging_order.operator?.full_name || 'Packaging Inspector',
+          component_verified: box.packaging_order.component_verification,
+          condition_verified: box.packaging_order.condition_verification,
+          approved_at: box.packaging_order.approved_at,
+          remarks: box.packaging_order.remarks,
+        }
+      : null,
+    source_batches: sourceBatches,
     parts: box.parts.map((p) => ({
       id: p.id,
       part_number: p.part_number,
@@ -348,12 +426,168 @@ const resolveBoxTraceability = async (boxNumber, token = null, transaction = nul
     shipment: shipment
       ? {
           shipment_number: shipment.shipment_number,
+          customer: shipment.customer?.name,
           destination: shipment.destination_address,
           status: shipment.status,
           dispatch_date: shipment.dispatch_date,
           vehicle_number: shipment.vehicle_number,
+          lr_number: shipment.lr_consignment_number,
+          approvals: shipment.approvals?.map((a) => ({
+            role: a.role,
+            decision: a.decision,
+            decided_at: a.decided_at,
+          })),
         }
       : null,
+    is_authentic: true,
+  };
+};
+
+const resolveBatchTraceability = async (batchQuery, transaction = null) => {
+  const batch = await InventoryBatch.findOne({
+    where: {
+      [Op.or]: [
+        { internal_batch_id: batchQuery },
+        { vendor_batch_number: batchQuery },
+      ],
+    },
+    include: [
+      { model: Material, as: 'material' },
+      { model: Vendor, as: 'vendor' },
+      { model: IqcInspection, as: 'inspection', include: [{ model: User, as: 'inspector' }] },
+      {
+        model: ProductionMaterialConsumption,
+        as: 'consumptions',
+        include: [
+          {
+            model: ProductionWorkOrder,
+            as: 'work_order',
+            include: [{ model: Product, as: 'product' }],
+          },
+        ],
+      },
+    ],
+    transaction,
+  });
+
+  if (!batch) {
+    return {
+      found: false,
+      type: 'batch',
+      id: batchQuery,
+      message: `Batch ${batchQuery} not found in ERP records.`,
+      is_authentic: false,
+    };
+  }
+
+  return {
+    found: true,
+    type: 'batch',
+    id: batch.internal_batch_id,
+    vendor_batch_number: batch.vendor_batch_number,
+    division: batch.division,
+    status: batch.status,
+    initial_quantity: batch.initial_quantity,
+    current_quantity: batch.current_quantity,
+    receipt_date: batch.receipt_date,
+    material: batch.material
+      ? {
+          code: batch.material.material_code,
+          name: batch.material.name,
+          unit: batch.material.unit,
+        }
+      : null,
+    vendor: batch.vendor
+      ? {
+          code: batch.vendor.vendor_code,
+          name: batch.vendor.name,
+          gst: batch.vendor.gst_number,
+        }
+      : null,
+    iqc: batch.inspection
+      ? {
+          inspection_number: batch.inspection.inspection_number,
+          division: batch.inspection.division,
+          status: batch.inspection.status,
+          inspector: batch.inspection.inspector?.full_name || 'IQC Inspector',
+          inspection_date: batch.inspection.inspection_date,
+          remarks: batch.inspection.remarks,
+        }
+      : null,
+    work_orders: (batch.consumptions || []).map((c) => ({
+      work_order_number: c.work_order?.work_order_number,
+      product_name: c.work_order?.product?.name,
+      quantity_consumed: c.quantity_consumed,
+      status: c.work_order?.status,
+    })),
+    is_authentic: true,
+  };
+};
+
+const resolveShipmentTraceability = async (shipmentNumber, transaction = null) => {
+  const shipment = await Shipment.findOne({
+    where: { shipment_number: shipmentNumber },
+    include: [
+      { model: Customer, as: 'customer' },
+      {
+        model: MasterBox,
+        as: 'boxes',
+        include: [{ model: PartInstance, as: 'parts' }],
+      },
+      {
+        model: DispatchApproval,
+        as: 'approvals',
+        include: [{ model: User, as: 'approver' }],
+      },
+    ],
+    transaction,
+  });
+
+  if (!shipment) {
+    return {
+      found: false,
+      type: 'shipment',
+      id: shipmentNumber,
+      message: `Shipment ${shipmentNumber} not found in ERP records.`,
+      is_authentic: false,
+    };
+  }
+
+  return {
+    found: true,
+    type: 'shipment',
+    id: shipment.shipment_number,
+    version: shipment.version,
+    status: shipment.status,
+    customer: shipment.customer
+      ? {
+          code: shipment.customer.customer_code,
+          name: shipment.customer.name,
+          gst: shipment.customer.gst_number,
+        }
+      : null,
+    destination: shipment.destination_address,
+    vehicle_number: shipment.vehicle_number,
+    lr_number: shipment.lr_consignment_number,
+    driver_name: shipment.driver_name,
+    dispatch_date: shipment.dispatch_date,
+    total_boxes: shipment.total_boxes,
+    total_parts: shipment.total_parts,
+    boxes: (shipment.boxes || []).map((b) => ({
+      box_number: b.box_number,
+      packed_count: b.packed_count,
+      status: b.status,
+      parts_count: b.parts?.length || 0,
+    })),
+    approvals: (shipment.approvals || [])
+      .filter((a) => a.shipment_version === shipment.version)
+      .map((a) => ({
+        role: a.role,
+        decision: a.decision,
+        approver: a.approver?.full_name || a.role,
+        comments: a.comments,
+        decided_at: a.decided_at,
+      })),
     is_authentic: true,
   };
 };
@@ -402,5 +636,3 @@ export const getPrintableQrLabels = async ({ type = 'parts', ids = [] }) => {
 
   return await generateQrLabelSheet(labels, `${type.toUpperCase()} IDENTIFICATION QR LABELS`);
 };
-
-

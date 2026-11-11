@@ -508,6 +508,8 @@ BomItem.belongsTo(Product, { foreignKey: 'product_id' });
 BomItem.belongsTo(Material, { foreignKey: 'material_id', as: 'material' });
 
 // PO
+Vendor.hasMany(PurchaseOrder, { foreignKey: 'vendor_id', as: 'purchase_orders' });
+Vendor.hasMany(IqcInspection, { foreignKey: 'vendor_id', as: 'iqc_inspections' });
 PurchaseOrder.belongsTo(Vendor, { foreignKey: 'vendor_id', as: 'vendor' });
 PurchaseOrder.belongsTo(Customer, { foreignKey: 'customer_id', as: 'customer' });
 PurchaseOrder.belongsTo(User, { foreignKey: 'created_by', as: 'creator' });
@@ -536,6 +538,7 @@ InventoryBatch.belongsTo(Material, { foreignKey: 'material_id', as: 'material' }
 InventoryBatch.belongsTo(IqcInspection, { foreignKey: 'iqc_id', as: 'inspection' });
 InventoryBatch.belongsTo(Location, { foreignKey: 'location_id', as: 'location' });
 InventoryBatch.hasMany(InventoryTransaction, { foreignKey: 'batch_id', as: 'transactions' });
+InventoryBatch.hasMany(ProductionMaterialConsumption, { foreignKey: 'batch_id', as: 'consumptions' });
 InventoryTransaction.belongsTo(InventoryBatch, { foreignKey: 'batch_id', as: 'batch' });
 InventoryTransaction.belongsTo(Material, { foreignKey: 'material_id', as: 'material' });
 InventoryTransaction.belongsTo(User, { foreignKey: 'created_by', as: 'creator' });
@@ -556,7 +559,7 @@ ProductionWorkOrder.belongsTo(Product, { foreignKey: 'product_id', as: 'product'
 ProductionWorkOrder.belongsTo(User, { foreignKey: 'assigned_to', as: 'assignee' });
 ProductionWorkOrder.belongsTo(Department, { foreignKey: 'department_id', as: 'department' });
 ProductionWorkOrder.hasMany(ProductionMaterialConsumption, { foreignKey: 'work_order_id', as: 'consumptions' });
-ProductionMaterialConsumption.belongsTo(ProductionWorkOrder, { foreignKey: 'work_order_id' });
+ProductionMaterialConsumption.belongsTo(ProductionWorkOrder, { foreignKey: 'work_order_id', as: 'work_order' });
 ProductionMaterialConsumption.belongsTo(InventoryBatch, { foreignKey: 'batch_id', as: 'batch' });
 ProductionMaterialConsumption.belongsTo(Material, { foreignKey: 'material_id', as: 'material' });
 ProductionWorkOrder.hasMany(SampleQcRecord, { foreignKey: 'work_order_id', as: 'qc_records' });
@@ -593,7 +596,7 @@ Shipment.belongsTo(User, { foreignKey: 'created_by', as: 'creator' });
 Shipment.belongsToMany(MasterBox, { through: ShipmentBox, foreignKey: 'shipment_id', as: 'boxes' });
 MasterBox.belongsToMany(Shipment, { through: ShipmentBox, foreignKey: 'box_id', as: 'shipments' });
 Shipment.hasMany(DispatchApproval, { foreignKey: 'shipment_id', as: 'approvals' });
-DispatchApproval.belongsTo(Shipment, { foreignKey: 'shipment_id' });
+DispatchApproval.belongsTo(Shipment, { foreignKey: 'shipment_id', as: 'shipment' });
 DispatchApproval.belongsTo(User, { foreignKey: 'approver_id', as: 'approver' });
 
 // Complaint

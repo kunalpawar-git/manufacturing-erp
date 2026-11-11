@@ -4,19 +4,26 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import swaggerUi from 'swagger-ui-express';
 import { connectDatabase } from './config/database.js';
 import apiRouter from './routes/apiRouter.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { swaggerDocument } from './config/swagger.js';
+import { Role } from './models/index.js';
+import { seedDatabase } from './seeders/seed.js';
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Security & utilities
-app.use(helmet({ crossOriginResourcePolicy: false }));
+app.use(helmet({ crossOriginResourcePolicy: false, contentSecurityPolicy: false }));
 app.use(cors({ origin: '*', credentials: true }));
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
@@ -45,12 +52,33 @@ app.get('/api/health', (req, res) => {
 // Mount Main API routes
 app.use('/api', apiRouter);
 
+// Serve built React Frontend in production / unified single-host deployments
+const frontendDistPath = path.resolve(__dirname, '../../frontend/dist');
+if (fs.existsSync(frontendDistPath)) {
+  app.use(express.static(frontendDistPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
+      return next();
+    }
+    res.sendFile(path.join(frontendDistPath, 'index.html'));
+  });
+}
+
 // Central Error Handler
 app.use(errorHandler);
 
 export const startServer = async () => {
   try {
-    await connectDatabase();
+    const db = await connectDatabase();
+    await db.sync();
+
+    // Auto-seed on first boot if database is empty (ideal for free cloud hosting without shell access)
+    const roleCount = await Role.count();
+    if (roleCount === 0 && process.env.AUTO_SEED !== 'false') {
+      console.log('[Startup] Empty database detected — running initial ERP seed automatically...');
+      await seedDatabase(false);
+    }
+
     return app.listen(PORT, () => {
       console.log(`=======================================================`);
       console.log(` Manufacturing ERP Backend Server active on port ${PORT}`);
