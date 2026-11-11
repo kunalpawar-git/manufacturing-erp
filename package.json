@@ -1,0 +1,23 @@
+{
+  "name": "manufacturing-erp",
+  "version": "1.0.0",
+  "description": "Manufacturing Operations ERP - Inventory, Production, and Batch QR Traceability System",
+  "scripts": {
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "seed": "cd backend && npm run seed",
+    "test": "cd backend && npm run test",
+    "build": "cd frontend && npm run build"
+  },
+  "keywords": [
+    "erp",
+    "manufacturing",
+    "traceability",
+    "qr-code",
+    "iqc",
+    "dispatch-clearance"
+  ],
+  "author": "Antigravity Engineering Team",
+  "license": "ISC"
+}
+
